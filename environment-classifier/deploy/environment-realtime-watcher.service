@@ -1,0 +1,12 @@
+[Unit]
+Description=Ripple realtime environment watcher
+After=network-online.target
+
+[Service]
+User=spencergoff
+WorkingDirectory=/home/spencergoff/ripple
+ExecStart=/home/spencergoff/ripple/.venv/bin/python -m scripts.realtime_watcher
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
