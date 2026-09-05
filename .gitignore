@@ -1,0 +1,6 @@
+.venv/
+*.egg-info/
+realtime-uploads/
+training-uploads/
+audio-uploader-prod.service
+environment-realtime-watcher-prod.service
