@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# /usr/local/bin/dev-release
+#
+# Releases the ripple dev slot claim held by the invoking user. Leaves the
+# symlink pointed at their checkout (harmless — the next dev-claim
+# overwrites it) but clears the lock so someone else can claim.
+#
+# Usage: sudo dev-release
+ 
+set -euo pipefail
+ 
+### --- Config: must match dev-claim -----------------------------------------
+RIPPLE_DEV_LOCKFILE="/srv/projects/ripple_dev/active.json"
+RIPPLE_DEV_LOGFILE="/var/log/ripple-dev-claim.log"
+### ---------------------------------------------------------------------------
+ 
+CLAIM_USER="${SUDO_USER:-}"
+if [[ -z "$CLAIM_USER" ]]; then
+    echo "Run this with sudo (e.g. 'sudo dev-release')." >&2
+    exit 1
+fi
+ 
+if [[ ! -f "$RIPPLE_DEV_LOCKFILE" ]]; then
+    echo "Dev slot is not currently claimed."
+    exit 0
+fi
+ 
+current_user=$(python3 -c "import json; print(json.load(open('$RIPPLE_DEV_LOCKFILE')).get('user',''))" 2>/dev/null || true)
+ 
+if [[ "$current_user" != "$CLAIM_USER" ]]; then
+    echo "Dev slot is claimed by '$current_user', not you — not releasing." >&2
+    echo "(If they're gone, wait for it to go stale, or have an admin remove $RIPPLE_DEV_LOCKFILE.)" >&2
+    exit 1
+fi
+ 
+rm -f "$RIPPLE_DEV_LOCKFILE"
+echo "$(date -Iseconds) RELEASE user=$CLAIM_USER" >> "$RIPPLE_DEV_LOGFILE"
+echo "Dev slot released."

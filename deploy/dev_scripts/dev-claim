@@ -1,0 +1,90 @@
+
+#!/usr/bin/env bash
+# /usr/local/bin/dev-claim
+#
+# Claims the shared ripple dev slot for the invoking user: repoints the
+# /srv/projects/ripple_dev/current symlink at their ~/ripple checkout and
+# restarts the two dev services so they pick it up.
+#
+# Usage: sudo dev-claim
+#
+# Re-running this as the SAME user who already holds the claim just renews
+# it (fresh timestamp, services restarted again) — that's the mechanism for
+# extending a long test session, no separate "heartbeat" needed.
+ 
+set -euo pipefail
+ 
+### --- Config: adjust these three to match your actual server --------------
+RIPPLE_DEV_LINK="/srv/projects/ripple_dev/current"
+RIPPLE_DEV_LOCKFILE="/srv/projects/ripple_dev/active.json"
+RIPPLE_DEV_LOGFILE="/var/log/ripple-dev-claim.log"
+# Exact `systemctl` unit names of the two dev services you created:
+DEV_SERVICES=(audio-uploader-dev.service environment-realtime-watcher-dev.service)
+# How long (minutes) an unrenewed claim stays valid before someone else can take it:
+STALE_MINUTES=45
+### ---------------------------------------------------------------------------
+ 
+CLAIM_USER="${SUDO_USER:-}"
+if [[ -z "$CLAIM_USER" ]]; then
+    echo "Run this with sudo (e.g. 'sudo dev-claim'), not directly as root." >&2
+    exit 1
+fi
+ 
+USER_HOME=$(getent passwd "$CLAIM_USER" | cut -d: -f6)
+if [[ -z "$USER_HOME" ]]; then
+    echo "Could not find a home directory for user '$CLAIM_USER'." >&2
+    exit 1
+fi
+CHECKOUT_DIR="$USER_HOME/ripple"
+ 
+if [[ ! -d "$CHECKOUT_DIR" ]]; then
+    echo "No ripple checkout found at $CHECKOUT_DIR — clone it there first." >&2
+    exit 1
+fi
+if [[ ! -x "$CHECKOUT_DIR/audio-uploader/venv/bin/python" ]]; then
+    echo "Warning: $CHECKOUT_DIR/audio-uploader/venv doesn't look set up yet." >&2
+fi
+if [[ ! -x "$CHECKOUT_DIR/.venv/bin/python" ]]; then
+    echo "Warning: $CHECKOUT_DIR/.venv doesn't look set up yet." >&2
+fi
+ 
+mkdir -p "$(dirname "$RIPPLE_DEV_LOCKFILE")"
+ 
+# Serialize concurrent claim attempts with a flock, so two people running
+# `sudo dev-claim` at the same instant can't both think they succeeded.
+exec {FLOCK_FD}>"$RIPPLE_DEV_LOCKFILE.lock"
+flock -w 10 "$FLOCK_FD" || { echo "Could not acquire claim lock (busy) — try again." >&2; exit 1; }
+ 
+now_epoch=$(date +%s)
+ 
+current_user=""
+current_claimed_at=0
+if [[ -f "$RIPPLE_DEV_LOCKFILE" ]]; then
+    current_user=$(python3 -c "import json; print(json.load(open('$RIPPLE_DEV_LOCKFILE')).get('user',''))" 2>/dev/null || true)
+    current_claimed_at=$(python3 -c "import json; print(json.load(open('$RIPPLE_DEV_LOCKFILE')).get('claimed_at_epoch',0))" 2>/dev/null || echo 0)
+fi
+ 
+if [[ -n "$current_user" && "$current_user" != "$CLAIM_USER" ]]; then
+    age_minutes=$(( (now_epoch - current_claimed_at) / 60 ))
+    if (( age_minutes < STALE_MINUTES )); then
+        echo "Dev slot is currently claimed by '$current_user' (claimed ${age_minutes} min ago)." >&2
+        echo "Ask them to run 'sudo dev-release', or wait until it goes stale after ${STALE_MINUTES} min." >&2
+        exit 1
+    else
+        echo "Previous claim by '$current_user' is stale (${age_minutes} min) — taking over."
+    fi
+fi
+ 
+ln -sfn "$CHECKOUT_DIR" "$RIPPLE_DEV_LINK"
+ 
+cat > "$RIPPLE_DEV_LOCKFILE" <<EOF
+{"user": "$CLAIM_USER", "checkout": "$CHECKOUT_DIR", "claimed_at_epoch": $now_epoch, "claimed_at": "$(date -Iseconds)"}
+EOF
+ 
+echo "$(date -Iseconds) CLAIM user=$CLAIM_USER checkout=$CHECKOUT_DIR" >> "$RIPPLE_DEV_LOGFILE"
+ 
+systemctl restart "${DEV_SERVICES[@]}"
+ 
+echo "Dev slot claimed for $CLAIM_USER -> $CHECKOUT_DIR"
+echo "Restarted: ${DEV_SERVICES[*]}"
+echo "Flip the device to dev mode now. Run 'sudo dev-release' when you're done testing."

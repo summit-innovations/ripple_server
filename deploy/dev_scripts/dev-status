@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# /usr/local/bin/dev-status
+#
+# Shows who currently holds the ripple dev slot claim, if anyone.
+#
+# Usage: sudo dev-status
+ 
+set -euo pipefail
+ 
+### --- Config: must match dev-claim -----------------------------------------
+RIPPLE_DEV_LOCKFILE="/srv/projects/ripple_dev/active.json"
+STALE_MINUTES=45
+### ---------------------------------------------------------------------------
+ 
+if [[ ! -f "$RIPPLE_DEV_LOCKFILE" ]]; then
+    echo "Dev slot: unclaimed."
+    exit 0
+fi
+ 
+python3 - "$RIPPLE_DEV_LOCKFILE" "$STALE_MINUTES" <<'PYEOF'
+import json, sys, time
+lockfile, stale_minutes = sys.argv[1], int(sys.argv[2])
+d = json.load(open(lockfile))
+age_min = (time.time() - d["claimed_at_epoch"]) / 60
+status = "STALE" if age_min > stale_minutes else "active"
+print(f"Dev slot: claimed by {d['user']} at {d['claimed_at']} ({age_min:.0f} min ago, {status})")
+print(f"Checkout: {d['checkout']}")
+PYEOF
