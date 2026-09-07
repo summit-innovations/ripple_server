@@ -4,9 +4,9 @@ After=network-online.target
 
 [Service]
 User=www-data
-WorkingDirectory=/srv/projects/ripple_dev/current/environment-classifier
-Environment=RIPPLE_BASE_DIR=/srv/projects/ripple_dev/current
-ExecStart=/srv/projects/ripple_dev/current/environment-classifier/.venv/bin/python -m scripts.realtime_watcher
+WorkingDirectory=/srv/projects/ripple_dev/current/ripple_server/environment-classifier
+Environment=RIPPLE_BASE_DIR=/srv/projects/ripple_dev/current/ripple_server
+ExecStart=/srv/projects/ripple_dev/current/ripple_server/environment-classifier/.venv/bin/python -m scripts.realtime_watcher
 Restart=always
 
 [Install]
