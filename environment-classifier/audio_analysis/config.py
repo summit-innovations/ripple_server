@@ -18,6 +18,7 @@ environment's tuning knobs are easy to find and reason about independently.
 from dataclasses import dataclass
 from pathlib import Path
 
+_RIPPLE_BASE_DIR = Path(os.getenv("RIPPLE_BASE_DIR", "/srv/projects/ripple_server"))
 
 @dataclass(frozen=True)
 class AudioConfig:
@@ -185,19 +186,19 @@ class IngestionConfig:
     """
 
     #: Source directory of static, pre-recorded training clips (raw audio).
-    AUDIO_TRAINING_DIR: Path = Path("/srv/projects/ripple_server/audio-uploader/training-uploads")
+    AUDIO_TRAINING_DIR: Path = _RIPPLE_BASE_DIR / "audio-uploader" / "training-uploads"
 
     #: Source directory that some external process drops/overwrites live
     #: audio clips into. This project only watches it -- it does not write
     #: here.
-    AUDIO_REALTIME_DIR: Path = Path("/srv/projects/ripple_server/audio-uploader/realtime-uploads")
+    AUDIO_REALTIME_DIR: Path = _RIPPLE_BASE_DIR / "audio-uploader" / "realtime-uploads"
 
     #: Destination directory for one JSON result file per training clip.
-    RESULTS_TRAINING_DIR: Path = Path("/srv/projects/ripple_server/environment-uploader/training-uploads")
+    RESULTS_TRAINING_DIR: Path = _RIPPLE_BASE_DIR / "environment-uploader" / "training-uploads"
 
     #: Destination directory for the realtime daemon's single "latest result"
     #: file.
-    RESULTS_REALTIME_DIR: Path = Path("/srv/projects/ripple_server/environment-uploader/realtime-uploads")
+    RESULTS_REALTIME_DIR: Path = _RIPPLE_BASE_DIR / "environment-uploader" / "realtime-uploads"
 
     #: Filename of the realtime daemon's single result file, overwritten in
     #: place on every newly detected signal.

@@ -4,12 +4,14 @@ from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException, Header, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 
+RIPPLE_BASE_DIR = Path(os.getenv("RIPPLE_BASE_DIR", "/srv/projects/ripple_server"))
+
+REALTIME_DIR = RIPPLE_BASE_DIR / "audio-uploader" / "realtime-uploads"
+REALTIME_DIR.mkdir(parents=True, exist_ok=True)
+TRAINING_DIR = RIPPLE_BASE_DIR / "audio-uploader" / "training-uploads"
+TRAINING_DIR.mkdir(parents=True, exist_ok=True)
 API_KEY = os.environ["UPLOAD_API_KEY"]
-REALTIME_DIR = Path("/srv/projects/ripple_server/audio-uploader/realtime-uploads")
-REALTIME_DIR.mkdir(exist_ok=True)
-TRAINING_DIR = Path("/srv/projects/ripple_server/audio-uploader/training-uploads")
-TRAINING_DIR.mkdir(exist_ok=True)
-RESULTS_FILE = "/srv/projects/ripple_server/environment-uploader/realtime-uploads/latest.json"
+RESULTS_FILE = RIPPLE_BASE_DIR / "environment-uploader" / "realtime-uploads" / "latest.json"
 
 app = FastAPI()
 
