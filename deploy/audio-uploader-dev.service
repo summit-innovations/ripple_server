@@ -4,10 +4,10 @@ After=network-online.target
 
 [Service]
 User=www-data
-WorkingDirectory=/srv/projects/ripple_dev/current/ripple_server/audio-uploader
+WorkingDirectory=/srv/projects/ripple_dev/current/audio-uploader
 Environment=UPLOAD_API_KEY=c18ec4ba23d30007f7b6a304d79762db3f6f69eecc7fbded89949a6c3ac5f24c
-Environment=RIPPLE_BASE_DIR=/srv/projects/ripple_dev/current/ripple_server
-ExecStart=/srv/projects/ripple_dev/current/ripple_server/audio-uploader/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8080
+Environment=RIPPLE_BASE_DIR=/srv/projects/ripple_dev/current
+ExecStart=/srv/projects/ripple_dev/current/audio-uploader/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8080
 Restart=always
 
 [Install]
