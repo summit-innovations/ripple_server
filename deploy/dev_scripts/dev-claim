@@ -2,8 +2,8 @@
 # /usr/local/bin/dev-claim
 #
 # Claims the shared ripple dev slot for the invoking user: repoints the
-# /srv/projects/ripple_dev/current symlink at their ~/ripple checkout and
-# restarts the two dev services so they pick it up.
+# /srv/projects/ripple_dev/current symlink at their ~/ripple_server checkout
+# and restarts the two dev services so they pick it up.
 #
 # Usage: sudo dev-claim
 #
@@ -43,8 +43,8 @@ fi
 if [[ ! -x "$CHECKOUT_DIR/audio-uploader/venv/bin/python" ]]; then
     echo "Warning: $CHECKOUT_DIR/audio-uploader/venv doesn't look set up yet." >&2
 fi
-if [[ ! -x "$CHECKOUT_DIR/.venv/bin/python" ]]; then
-    echo "Warning: $CHECKOUT_DIR/.venv doesn't look set up yet." >&2
+if [[ ! -x "$CHECKOUT_DIR/environment-classifier/.venv/bin/python" ]]; then
+    echo "Warning: $CHECKOUT_DIR/environment-classifier/.venv doesn't look set up yet." >&2
 fi
  
 mkdir -p "$(dirname "$RIPPLE_DEV_LOCKFILE")"
