@@ -34,7 +34,7 @@ if [[ -z "$USER_HOME" ]]; then
     echo "Could not find a home directory for user '$CLAIM_USER'." >&2
     exit 1
 fi
-CHECKOUT_DIR="$USER_HOME/ripple"
+CHECKOUT_DIR="$USER_HOME/ripple_server"
  
 if [[ ! -d "$CHECKOUT_DIR" ]]; then
     echo "No ripple checkout found at $CHECKOUT_DIR — clone it there first." >&2
