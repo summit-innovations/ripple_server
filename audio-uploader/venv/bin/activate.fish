@@ -33,7 +33,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV /srv/projects/ripple_server/audio-uploader/venv
+set -gx VIRTUAL_ENV /home/samfry/ripple_server/audio-uploader/venv
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/"bin $PATH

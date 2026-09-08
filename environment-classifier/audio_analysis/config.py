@@ -17,6 +17,7 @@ environment's tuning knobs are easy to find and reason about independently.
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
 
 _RIPPLE_BASE_DIR = Path(os.getenv("RIPPLE_BASE_DIR", "/srv/projects/ripple_server"))
 
