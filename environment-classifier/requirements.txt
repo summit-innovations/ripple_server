@@ -29,7 +29,7 @@ pyparsing==3.3.2
 pytest==9.1.1
 python-dateutil==2.9.0.post0
 requests==2.34.2
--e git+ssh://git@github.com/summit-innovations/ripple_server.git@a04f0779b9dfb866982543270e3b1db2df0425c5#egg=ripple&subdirectory=environment-classifier
+-e ./
 scikit-learn==1.9.0
 scipy==1.18.0
 six==1.17.0
