@@ -4,6 +4,7 @@ venv/
 *.egg-info/
 realtime-uploads/
 training-uploads/
+environment-uploader/
 audio-uploader-prod.service
 environment-realtime-watcher-prod.service
 dev-claim.exe
