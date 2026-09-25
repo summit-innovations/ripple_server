@@ -23,8 +23,8 @@ The pipeline works as follows: the microcontroller determines an environment, pr
 sudo apt update
 sudo apt install python3-venv
 ```
-3. Create virtual environment using `python3 -m venv ~/ripple_server/audio-uploader/venv` and `python -m venv ~/ripple_server/environment-classifier/.venv`
-4. Activate venv: `source ./venv/bin/activate` 
+3. Create virtual environment using `python3 -m venv ~/ripple_server/audio-uploader/.venv` and `python3 -m venv ~/ripple_server/environment-classifier/.venv`
+4. Activate venv: `source ./.venv/bin/activate` 
 5. Install dependencies:
 ```
 pip install -r requirements.txt
