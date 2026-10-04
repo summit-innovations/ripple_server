@@ -1,68 +1,104 @@
 #!/usr/bin/env bash
 # /usr/local/bin/dev-claim
 #
-# Claims the shared ripple dev slot for the invoking user: repoints the
-# /srv/projects/ripple_dev/current symlink at their ~/ripple_server checkout
-# and restarts the two dev services so they pick it up.
+# Claims the shared ripple dev slot for the invoking user:
+#   1. repoints /srv/projects/ripple_dev/current at their ~/ripple_server checkout
+#   2. repoints each dev service's unit-file symlink in /etc/systemd/system at the
+#      user's own prototype (~/ripple_server/<UNIT_REPO_SUBDIR>/<unit>), or back at
+#      the production repo's copy if they don't have one
+#   3. daemon-reloads systemd and restarts both dev services together
 #
 # Usage: sudo dev-claim
 #
-# Re-running this as the SAME user who already holds the claim just renews
-# it (fresh timestamp, services restarted again) — that's the mechanism for
-# extending a long test session, no separate "heartbeat" needed.
- 
+# Re-running this as the SAME user who already holds the claim renews it
+# (fresh timestamp, prototypes re-checked, services restarted) — that's also
+# how you make an edited prototype take effect.
+#
+# SECURITY NOTE: systemd reads unit files as root and does what they say, so
+# whoever can edit a linked prototype can make the next daemon-reload (or
+# reboot) run anything as root. The content check below only runs at claim
+# time; edits made after that are NOT re-checked. The ownership/permission
+# checks make sure the only person who can edit it is the claiming developer —
+# in particular not www-data, which can write most of each checkout through
+# the ripple-dev group.
+
 set -euo pipefail
- 
-### --- Config: adjust these three to match your actual server --------------
+
+### --- Config: adjust to match your actual server ----------------------------
 RIPPLE_DEV_LINK="/srv/projects/ripple_dev/current"
 RIPPLE_DEV_LOCKFILE="/srv/projects/ripple_dev/active.json"
 RIPPLE_DEV_LOGFILE="/var/log/ripple-dev-claim.log"
-# Exact `systemctl` unit names of the two dev services you created:
+# Exact `systemctl` unit names of the two dev services:
 DEV_SERVICES=(audio-uploader-dev.service environment-realtime-watcher-dev.service)
 # How long (minutes) an unrenewed claim stays valid before someone else can take it:
 STALE_MINUTES=45
+# Production clone of the ripple repo (root-only):
+PROD_REPO="/srv/projects/ripple_server"
+# Folder INSIDE the ripple repo that holds the unit files. Same relative path is
+# used in the production clone and in each developer's ~/ripple_server.
+# Check it on the server with:  readlink /etc/systemd/system/audio-uploader-dev.service
+UNIT_REPO_SUBDIR="deploy"
+# Where systemd looks for the unit-file symlinks:
+UNIT_INSTALL_DIR="/etc/systemd/system"
+# Account every dev unit must run as:
+REQUIRED_USER="www-data"
 ### ---------------------------------------------------------------------------
- 
+
+# Ensures that the file is being run as root
 CLAIM_USER="${SUDO_USER:-}"
 if [[ -z "$CLAIM_USER" ]]; then
     echo "Run this with sudo (e.g. 'sudo dev-claim'), not directly as root." >&2
     exit 1
 fi
- 
+
+# Gets the root directory of the user executing the script
 USER_HOME=$(getent passwd "$CLAIM_USER" | cut -d: -f6)
 if [[ -z "$USER_HOME" ]]; then
     echo "Could not find a home directory for user '$CLAIM_USER'." >&2
     exit 1
 fi
+
+# Home directory of the unit files and dev programs
 CHECKOUT_DIR="$USER_HOME/ripple_server"
- 
+
 if [[ ! -d "$CHECKOUT_DIR" ]]; then
     echo "No ripple checkout found at $CHECKOUT_DIR — clone it there first." >&2
     exit 1
 fi
-if [[ ! -x "$CHECKOUT_DIR/audio-uploader/venv/bin/python" ]]; then
-    echo "Warning: $CHECKOUT_DIR/audio-uploader/venv doesn't look set up yet." >&2
+if [[ ! -x "$CHECKOUT_DIR/audio-uploader/.venv/bin/python" ]]; then
+    echo "Warning: $CHECKOUT_DIR/audio-uploader/.venv doesn't look set up yet." >&2
 fi
 if [[ ! -x "$CHECKOUT_DIR/environment-classifier/.venv/bin/python" ]]; then
     echo "Warning: $CHECKOUT_DIR/environment-classifier/.venv doesn't look set up yet." >&2
 fi
- 
+
+# ln -sfn silently nests a link INSIDE a real directory instead of replacing it
+# (troubleshooting-log #4), so refuse to continue if that's what's there.
+if [[ -e "$RIPPLE_DEV_LINK" && ! -L "$RIPPLE_DEV_LINK" ]]; then
+    echo "$RIPPLE_DEV_LINK exists but is a real directory/file, not a symlink." >&2
+    echo "An admin needs to remove it first (see troubleshooting-log #4)." >&2
+    exit 1
+fi
+
+# Creating json lock file
 mkdir -p "$(dirname "$RIPPLE_DEV_LOCKFILE")"
- 
+
 # Serialize concurrent claim attempts with a flock, so two people running
 # `sudo dev-claim` at the same instant can't both think they succeeded.
 exec {FLOCK_FD}>"$RIPPLE_DEV_LOCKFILE.lock"
 flock -w 10 "$FLOCK_FD" || { echo "Could not acquire claim lock (busy) — try again." >&2; exit 1; }
- 
+
+# Getting data for lock file
 now_epoch=$(date +%s)
- 
+
 current_user=""
 current_claimed_at=0
 if [[ -f "$RIPPLE_DEV_LOCKFILE" ]]; then
     current_user=$(python3 -c "import json; print(json.load(open('$RIPPLE_DEV_LOCKFILE')).get('user',''))" 2>/dev/null || true)
     current_claimed_at=$(python3 -c "import json; print(json.load(open('$RIPPLE_DEV_LOCKFILE')).get('claimed_at_epoch',0))" 2>/dev/null || echo 0)
 fi
- 
+
+# Ensuring dev spot has not been taken already or isn't stale
 if [[ -n "$current_user" && "$current_user" != "$CLAIM_USER" ]]; then
     age_minutes=$(( (now_epoch - current_claimed_at) / 60 ))
     if (( age_minutes < STALE_MINUTES )); then
@@ -73,17 +109,60 @@ if [[ -n "$current_user" && "$current_user" != "$CLAIM_USER" ]]; then
         echo "Previous claim by '$current_user' is stale (${age_minutes} min) — taking over."
     fi
 fi
- 
+
+# --- Decide where each unit symlink should point, checking everything first --
+# Nothing is changed until every unit has passed, so a failure leaves the server
+# exactly as it was.
+declare -A UNIT_TARGET   # unit name -> file its symlink should point at
+declare -A UNIT_SOURCE   # unit name -> "yours" or "production"
+
+for unit in "${DEV_SERVICES[@]}"; do
+    live="$UNIT_INSTALL_DIR/$unit"
+    if [[ -e "$live" && ! -L "$live" ]]; then
+        echo "$live is a real file, not a symlink — refusing to overwrite it." >&2
+        echo "An admin should check it and replace it with a symlink first." >&2
+        exit 1
+    fi
+
+    proto="$CHECKOUT_DIR/$UNIT_REPO_SUBDIR/$unit"
+    if [[ -e "$proto" || -L "$proto" ]]; then
+        # Attempt to find prototype unit file and connect it to the dictionary
+        UNIT_TARGET[$unit]="$proto"
+        UNIT_SOURCE[$unit]="yours"
+    else
+        prod="$PROD_REPO/$UNIT_REPO_SUBDIR/$unit"
+        if [[ ! -f "$prod" ]]; then
+            echo "No prototype at $proto and no production copy at $prod — can't set up $unit." >&2
+            exit 1
+        fi
+        UNIT_TARGET[$unit]="$prod"
+        UNIT_SOURCE[$unit]="production"
+    fi
+done
+
+# --- Apply -------------------------------------------------------------------
 ln -sfn "$CHECKOUT_DIR" "$RIPPLE_DEV_LINK"
- 
+
+for unit in "${DEV_SERVICES[@]}"; do
+    ln -sfn "${UNIT_TARGET[$unit]}" "$UNIT_INSTALL_DIR/$unit"
+done
+
 cat > "$RIPPLE_DEV_LOCKFILE" <<EOF
 {"user": "$CLAIM_USER", "checkout": "$CHECKOUT_DIR", "claimed_at_epoch": $now_epoch, "claimed_at": "$(date -Iseconds)"}
 EOF
- 
-echo "$(date -Iseconds) CLAIM user=$CLAIM_USER checkout=$CHECKOUT_DIR" >> "$RIPPLE_DEV_LOGFILE"
- 
+
+log_units=""
+for unit in "${DEV_SERVICES[@]}"; do
+    log_units+=" $unit->${UNIT_TARGET[$unit]}"
+done
+echo "$(date -Iseconds) CLAIM user=$CLAIM_USER checkout=$CHECKOUT_DIR units:$log_units" >> "$RIPPLE_DEV_LOGFILE"
+
+systemctl daemon-reload
 systemctl restart "${DEV_SERVICES[@]}"
- 
+
 echo "Dev slot claimed for $CLAIM_USER -> $CHECKOUT_DIR"
+for unit in "${DEV_SERVICES[@]}"; do
+    echo "  $unit -> ${UNIT_TARGET[$unit]}  (${UNIT_SOURCE[$unit]})"
+done
 echo "Restarted: ${DEV_SERVICES[*]}"
 echo "Flip the device to dev mode now. Run 'sudo dev-release' when you're done testing."
