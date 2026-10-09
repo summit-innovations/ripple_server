@@ -74,7 +74,8 @@ def test_variable_noisy_low_harmonic_signal_is_crowded_space():
     assert result.environment == Environment.CROWDED_SPACE
 
 
-def test_ambiguous_signal_falls_back_to_unknown():
+def test_ambiguous_signal_falls_back_to_closest_match():
+    """No rule fires outright, so the result should be whichever rule is numerically closest."""
     features = replace(
         _BASE,
         rms=0.1,
@@ -85,7 +86,10 @@ def test_ambiguous_signal_falls_back_to_unknown():
         onset_rate=1.0,
     )
     result = classify(features)
-    assert result.environment == Environment.UNKNOWN
+    # Closest by normalized threshold distance: clear speech (~0.69) beats
+    # crowded space (~1.47) and silence (~14.0) for this fixture.
+    assert result.environment == Environment.CLEAR_SPEECH
+    assert "closest match" in result.reasoning
 
 
 def test_silence_rule_is_checked_first():

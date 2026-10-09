@@ -37,7 +37,6 @@ class Environment(str, Enum):
     SILENCE = "silence"
     CLEAR_SPEECH = "clear_speech"
     CROWDED_SPACE = "crowded_space"
-    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -65,9 +64,10 @@ def classify(features: AudioFeatures) -> ClassificationResult:
       3. Crowded Space -- energetically variable, noise-like or event-dense,
          less purely harmonic than clean speech: characteristic of many
          overlapping sound sources.
-      4. Unknown -- none of the above matched confidently. Surfaced
-         explicitly rather than forced into the nearest label, since a
-         hearing-assistance context should not silently guess.
+
+    If none of the rules match confidently, there is no "Unknown" escape
+    hatch: every clip is forced into the environment whose thresholds it
+    comes closest to satisfying, via `_closest_match`.
     """
     if _looks_like_silence(features):
         return ClassificationResult(
@@ -109,11 +109,7 @@ def classify(features: AudioFeatures) -> ClassificationResult:
             ),
         )
 
-    return ClassificationResult(
-        environment=Environment.UNKNOWN,
-        reasoning="No rule matched confidently -- features did not fit silence, "
-        "clear speech, or crowded space thresholds.",
-    )
+    return _closest_match(features)
 
 
 def _looks_like_silence(features: AudioFeatures) -> bool:
@@ -144,4 +140,75 @@ def _looks_like_crowded_space(features: AudioFeatures) -> bool:
         features.short_term_energy_variance >= _crowded_cfg.MIN_ENERGY_VARIANCE
         and noisy_or_bursty
         and features.harmonic_ratio <= _crowded_cfg.MAX_HARMONIC_RATIO
+    )
+
+
+def _undershoot(value: float, min_threshold: float) -> float:
+    """How far `value` falls below a `>=` threshold, as a fraction of the threshold. 0 if satisfied."""
+    if value >= min_threshold:
+        return 0.0
+    return (min_threshold - value) / max(abs(min_threshold), 1e-10)
+
+
+def _overshoot(value: float, max_threshold: float) -> float:
+    """How far `value` rises above a `<=` threshold, as a fraction of the threshold. 0 if satisfied."""
+    if value <= max_threshold:
+        return 0.0
+    return (value - max_threshold) / max(abs(max_threshold), 1e-10)
+
+
+def _silence_distance(features: AudioFeatures) -> float:
+    """Total normalized violation of the silence thresholds; 0 means the rule is satisfied."""
+    return _overshoot(features.rms, _silence_cfg.MAX_RMS) + _overshoot(
+        features.peak, _silence_cfg.MAX_PEAK
+    )
+
+
+def _clear_speech_distance(features: AudioFeatures) -> float:
+    """Total normalized violation of the clear-speech thresholds; 0 means the rule is satisfied."""
+    return (
+        _undershoot(features.harmonic_ratio, _speech_cfg.MIN_HARMONIC_RATIO)
+        + _undershoot(features.speech_fraction, _speech_cfg.MIN_SPEECH_FRACTION)
+        + _undershoot(features.spectral_centroid, _speech_cfg.MIN_SPECTRAL_CENTROID_HZ)
+        + _overshoot(features.spectral_centroid, _speech_cfg.MAX_SPECTRAL_CENTROID_HZ)
+        + _overshoot(features.spectral_flatness, _speech_cfg.MAX_SPECTRAL_FLATNESS)
+        + _overshoot(features.onset_rate, _speech_cfg.MAX_ONSET_RATE)
+    )
+
+
+def _crowded_space_distance(features: AudioFeatures) -> float:
+    """Total normalized violation of the crowded-space thresholds; 0 means the rule is satisfied."""
+    noisy_or_bursty_violation = min(
+        _undershoot(features.spectral_flatness, _crowded_cfg.MIN_SPECTRAL_FLATNESS),
+        _undershoot(features.onset_rate, _crowded_cfg.MIN_ONSET_RATE),
+    )
+    return (
+        _undershoot(features.short_term_energy_variance, _crowded_cfg.MIN_ENERGY_VARIANCE)
+        + noisy_or_bursty_violation
+        + _overshoot(features.harmonic_ratio, _crowded_cfg.MAX_HARMONIC_RATIO)
+    )
+
+
+def _closest_match(features: AudioFeatures) -> ClassificationResult:
+    """
+    Fallback for a clip that satisfied none of the rules above.
+
+    Scores each environment by how far (as a normalized, summed fraction
+    over its own thresholds) the clip's features are from satisfying that
+    rule, and returns the environment with the smallest total violation --
+    i.e. whichever rule the clip came closest to matching. Ties keep the
+    same silence > clear speech > crowded space priority used above.
+    """
+    candidates = (
+        (Environment.SILENCE, _silence_distance(features)),
+        (Environment.CLEAR_SPEECH, _clear_speech_distance(features)),
+        (Environment.CROWDED_SPACE, _crowded_space_distance(features)),
+    )
+    environment, distance = min(candidates, key=lambda candidate: candidate[1])
+    return ClassificationResult(
+        environment=environment,
+        reasoning=(
+            f"No rule matched confidently; falling back to the closest match "
+            f"({environment.value}, total normalized threshold violation={distance:.3f})."
+        ),
     )
